@@ -27,7 +27,16 @@ def run_label_check(
                 "recommendation": "Provide a label column to enable class imbalance and label-noise analysis.",
             }
         )
-        return {"metrics": {}, "issues": issues, "row_flags": row_flags}
+        return {
+            "metrics": {
+                "rows": int(len(df)),
+                "labeled_rows": 0,
+                "num_classes": 0,
+                "label_distribution": {},
+            },
+            "issues": issues,
+            "row_flags": row_flags,
+        }
 
     labels = df[label_col].fillna("").astype(str)
     valid_mask = labels.str.len() > 0
@@ -103,12 +112,23 @@ def run_label_check(
                 idxs = np.where(mask.to_numpy())[0]
                 own_idx = centroid_labels.index(lab)
                 dists = 1.0 - sims[idxs, own_idx]
-                thresh = float(np.quantile(dists, 0.99))
+                mean_dist = float(np.mean(dists))
+                std_dist = float(np.std(dists))
+                if std_dist <= 1e-12:
+                    continue
                 for local_i, dist in zip(idxs.tolist(), dists.tolist(), strict=True):
-                    if float(dist) >= thresh:
+                    z_score = float((float(dist) - mean_dist) / std_dist)
+                    if z_score >= 2.0:
                         rid = int(row_ids[local_i])
                         row_flags.setdefault(rid, []).append("label_outlier")
-                        outliers.append({"row_id": rid, "label": lab, "distance_to_centroid": float(dist)})
+                        outliers.append(
+                            {
+                                "row_id": rid,
+                                "label": lab,
+                                "distance_to_centroid": float(dist),
+                                "z_score": z_score,
+                            }
+                        )
 
             if suspects:
                 issues.append(
@@ -152,4 +172,3 @@ def _normalize_vec(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 def _ensure_normalized(emb: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(emb, axis=1, keepdims=True)
     return emb / np.maximum(norms, 1e-12)
-

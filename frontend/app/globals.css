@@ -334,6 +334,37 @@ a {
   padding: 32px 18px 80px;
 }
 
+.analyze-container {
+  max-width: min(1600px, 100%);
+}
+
+.analyze-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.report-panel {
+  width: 100%;
+}
+
+.report-top {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.report-kpis {
+  min-width: 0;
+}
+
+.report-chart {
+  min-width: 0;
+  width: 100%;
+  height: 240px;
+}
+
 .title {
   font-family: var(--font-display), "Georgia", serif;
   font-size: 34px;
@@ -350,13 +381,6 @@ a {
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
-}
-
-@media (min-width: 980px) {
-  .grid {
-    grid-template-columns: 420px 1fr;
-    align-items: start;
-  }
 }
 
 .panel {
@@ -456,6 +480,81 @@ button:disabled {
 .issues li {
   margin: 6px 0;
   color: #1b1f29;
+}
+
+.breakdown-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.breakdown-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.breakdown-score {
+  margin-top: 6px;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.issue-plain {
+  margin-top: 4px;
+  color: #222937;
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+.issue-why {
+  margin-top: 4px;
+  color: #495061;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.issue-examples {
+  margin: 6px 0 0 0;
+  padding-left: 18px;
+}
+
+.issue-examples li {
+  margin: 4px 0;
+  color: #2c3342;
+  font-size: 0.9rem;
+}
+
+.issue-tech {
+  margin-top: 6px;
+}
+
+.issue-tech summary {
+  cursor: pointer;
+}
+
+.issue-tech-pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+@media (max-width: 980px) {
+  .report-top {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .report-chart {
+    height: 220px;
+  }
 }
 
 .sev-critical {

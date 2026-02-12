@@ -1,6 +1,6 @@
 # Dataset Quality Analyzer (Hugging Face Powered)
 
-Tooling to inspect a dataset *before* training by flagging duplicates, label issues, toxicity, domain mixing, and leakage; then producing a quality score (0–100) and a JSON report.
+Tooling to inspect a dataset before training by flagging duplicates, label issues, toxicity, domain mixing, and leakage, then producing a quality score (0-100) and JSON report.
 
 ## Quickstart
 
@@ -8,7 +8,7 @@ Tooling to inspect a dataset *before* training by flagging duplicates, label iss
 
 ```bash
 python -m venv .venv
-.venv\\Scripts\\activate
+.venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -26,7 +26,7 @@ npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if your API isn’t on `http://localhost:8000`.
+Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if your API is not `http://localhost:8000`.
 
 ## CLI (local report)
 
@@ -34,13 +34,20 @@ Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` if your API isn’t on `http:
 python -m reports.report_generator --csv data/sample.csv --out reports/sample.report.json
 ```
 
-If you want a fast run without downloading models:
+Fast mode without downloading HF models:
 
 ```bash
 python -m reports.report_generator --csv data/sample.csv --out reports/sample.report.json --no-hf-models
 ```
 
-## Notes
+## What changed in this refactor
 
-- Default columns are normalized to `text` and `label` (Phase 1).
-- Models download on first run (embedding + toxicity) and are cached by Hugging Face.
+- Modality-aware routing (`text`, `tabular`, `mixed`) now runs only relevant analyzers.
+- Tabular datasets use key-based duplicate logic instead of semantic embedding duplicates.
+- Domain-mixing logic is split by modality:
+  - text: embedding clustering
+  - tabular: cluster/category entropy alignment
+- Label outlier detection now uses class-distance Z-scores.
+- Embeddings are cached on disk (`embeddings/cache`) using dataset signature keys.
+- Issue output includes plain explanation, why-it-matters, and concrete row examples.
+

@@ -1,42 +1,47 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict
 
 
 WEIGHTS = {
-    "duplicates": 0.25,
-    "label_quality": 0.25,
-    "bias_toxicity": 0.20,
-    "text_quality": 0.15,
-    "data_leakage": 0.15,
+    "missing": 20,
+    "exact_duplicates": 20,
+    "label_issues": 10,
+    "toxicity": 20,
+    "semantic_warnings": 10,
+    "domain_mixing": 10,
+    "modality_warning": 10,
 }
 
 
 def compute_quality_score(*, module_metrics: Dict[str, Dict[str, object]]) -> Dict[str, object]:
+    schema = module_metrics.get("schema", {})
     dup = module_metrics.get("duplicates", {})
-    lab = module_metrics.get("labels", {})
-    tox = module_metrics.get("toxicity", {})
-    txt = module_metrics.get("text_quality", {})
-    leak = module_metrics.get("leakage", {})
+    labels = module_metrics.get("labels", {})
+    toxicity = module_metrics.get("toxicity", {})
+    text_quality = module_metrics.get("text_quality", {})
+    domain = module_metrics.get("domain", {})
+    modality = module_metrics.get("modality", {})
 
     subscores = {
-        "duplicates": _duplicates_score(dup),
-        "label_quality": _label_quality_score(lab),
-        "bias_toxicity": _toxicity_score(tox),
-        "text_quality": _text_quality_score(txt),
-        "data_leakage": _leakage_score(leak),
+        "missing": _missing_score(schema),
+        "exact_duplicates": _exact_duplicate_score(dup),
+        "label_issues": _label_issue_score(labels),
+        "toxicity": _toxicity_score(toxicity),
+        "semantic_warnings": _semantic_warning_score(dup, text_quality, modality),
+        "domain_mixing": _domain_mixing_score(domain),
+        "modality_warning": _modality_score(modality),
     }
 
     overall = 0.0
-    for k, w in WEIGHTS.items():
-        overall += float(subscores.get(k, 100.0)) * float(w)
+    for key, weight in WEIGHTS.items():
+        overall += float(subscores.get(key, 100.0)) * (float(weight) / 100.0)
 
     overall = max(0.0, min(100.0, overall))
-    verdict = _verdict(overall)
     return {
         "overall": round(overall, 2),
-        "verdict": verdict,
-        "weights": WEIGHTS,
+        "verdict": _verdict(overall),
+        "weights": {k: round(v / 100.0, 2) for k, v in WEIGHTS.items()},
         "subscores": {k: round(float(v), 2) for k, v in subscores.items()},
     }
 
@@ -49,80 +54,118 @@ def _verdict(score: float) -> str:
     return "high_risk"
 
 
-def _duplicates_score(metrics: Dict[str, object]) -> float:
+def _missing_score(metrics: Dict[str, object]) -> float:
     rows = int(metrics.get("rows") or 0)
+    missing = metrics.get("missing_values_per_column") or {}
+    empty_text = int(metrics.get("empty_text_rows") or 0)
+
     if rows <= 0:
         return 100.0
-    exact_rows = int(metrics.get("exact_duplicate_rows") or 0)
-    sem_clusters = int(metrics.get("semantic_duplicate_clusters") or 0)
-    dup_frac = float(exact_rows / rows)
 
-    penalty = 0.0
-    penalty += min(70.0, dup_frac * 200.0)  # 10% exact dupes -> -20 points
-    penalty += min(30.0, sem_clusters * 2.0)  # many clusters -> extra penalty
+    if isinstance(missing, dict) and missing:
+        col_count = max(1, len(missing))
+        total_missing = float(sum(float(v) for v in missing.values()))
+        missing_rate = total_missing / max(1.0, rows * col_count)
+    else:
+        missing_rate = 0.0
+
+    empty_rate = float(empty_text / max(1, rows))
+    penalty = min(100.0, (missing_rate * 220.0) + (empty_rate * 180.0))
     return max(0.0, 100.0 - penalty)
 
 
-def _label_quality_score(metrics: Dict[str, object]) -> float:
+def _exact_duplicate_score(metrics: Dict[str, object]) -> float:
     rows = int(metrics.get("rows") or 0)
     if rows <= 0:
         return 100.0
-    ratio = metrics.get("imbalance_ratio")
+
+    exact_rows = int(metrics.get("exact_duplicate_rows") or 0)
+    key_rows = int(metrics.get("key_duplicate_rows") or 0)
+    exact_rate = float(exact_rows / max(1, rows))
+    key_rate = float(key_rows / max(1, rows))
+
+    penalty = min(100.0, (exact_rate * 260.0) + (key_rate * 140.0))
+    return max(0.0, 100.0 - penalty)
+
+
+def _label_issue_score(metrics: Dict[str, object]) -> float:
+    rows = int(metrics.get("rows") or 0)
+    num_classes = int(metrics.get("num_classes") or 0)
+    if rows <= 0:
+        return 60.0
+    if num_classes <= 0:
+        return 60.0
+
+    imbalance_ratio = metrics.get("imbalance_ratio")
     suspects = int(metrics.get("suspected_mislabeled_samples") or 0)
     outliers = int(metrics.get("outlier_samples") or 0)
 
     penalty = 0.0
-    if isinstance(ratio, (int, float)) and ratio is not None:
-        penalty += min(50.0, max(0.0, float(ratio) - 1.0) * 3.0)  # ratio 10 -> -27
-
-    penalty += min(40.0, (suspects / max(1, rows)) * 400.0)  # 5% suspects -> -20
-    penalty += min(20.0, (outliers / max(1, rows)) * 200.0)  # 10% outliers -> -20
+    if isinstance(imbalance_ratio, (int, float)) and imbalance_ratio is not None:
+        penalty += min(45.0, max(0.0, float(imbalance_ratio) - 1.0) * 2.8)
+    penalty += min(30.0, (suspects / max(1, rows)) * 300.0)
+    penalty += min(25.0, (outliers / max(1, rows)) * 200.0)
     return max(0.0, 100.0 - penalty)
 
 
 def _toxicity_score(metrics: Dict[str, object]) -> float:
-    frac = metrics.get("toxic_fraction")
-    if not isinstance(frac, (int, float)) or frac is None:
-        return 100.0
-    frac = float(frac)
-    penalty = min(100.0, frac * 500.0)  # 1% toxic -> -5
-    return max(0.0, 100.0 - penalty)
-
-
-def _text_quality_score(metrics: Dict[str, object]) -> float:
-    readability = metrics.get("flesch_reading_ease")
-    repetition = metrics.get("avg_repetition_ratio")
-    vocab_richness = metrics.get("vocabulary_richness")
-
-    penalty = 0.0
-    if isinstance(readability, (int, float)) and readability:
-        r = float(readability)
-        if r < 30:
-            penalty += min(40.0, (30.0 - r) * 1.5)
-        if r > 90:
-            penalty += min(10.0, (r - 90.0) * 1.0)
-
-    if isinstance(repetition, (int, float)) and repetition is not None:
-        rep = float(repetition)
-        if rep > 0.5:
-            penalty += min(30.0, (rep - 0.5) * 60.0)
-
-    if isinstance(vocab_richness, (int, float)) and vocab_richness is not None:
-        vr = float(vocab_richness)
-        if vr < 0.05:
-            penalty += min(20.0, (0.05 - vr) * 400.0)
-
-    return max(0.0, 100.0 - penalty)
-
-
-def _leakage_score(metrics: Dict[str, object]) -> float:
     ran = metrics.get("ran")
     if ran is False:
         return 100.0
-    risk = metrics.get("leakage_risk")
-    if not isinstance(risk, (int, float)) or risk is None:
+    frac = metrics.get("toxic_fraction")
+    if not isinstance(frac, (int, float)) or frac is None:
         return 100.0
-    risk = float(risk)
-    penalty = min(100.0, risk * 2000.0)  # 1% -> -20
+    penalty = min(100.0, float(frac) * 500.0)
     return max(0.0, 100.0 - penalty)
+
+
+def _semantic_warning_score(
+    duplicate_metrics: Dict[str, object],
+    text_quality_metrics: Dict[str, object],
+    modality_metrics: Dict[str, object],
+) -> float:
+    modality = str(modality_metrics.get("modality") or "")
+    if modality == "tabular":
+        return 100.0
+
+    semantic_clusters = int(duplicate_metrics.get("semantic_duplicate_clusters") or 0)
+    readability = text_quality_metrics.get("flesch_reading_ease")
+
+    penalty = min(70.0, semantic_clusters * 2.5)
+    if isinstance(readability, (int, float)) and readability is not None and float(readability) < 30.0:
+        penalty += min(20.0, (30.0 - float(readability)) * 0.8)
+    return max(0.0, 100.0 - penalty)
+
+
+def _domain_mixing_score(metrics: Dict[str, object]) -> float:
+    ran = metrics.get("ran")
+    if ran is False:
+        return 100.0
+
+    mixing_flag = bool(metrics.get("mixing_flag"))
+    if not mixing_flag:
+        return 100.0
+
+    entropy = metrics.get("cluster_label_entropy")
+    if isinstance(entropy, (int, float)) and entropy is not None:
+        penalty = min(100.0, 25.0 + float(entropy) * 70.0)
+        return max(0.0, 100.0 - penalty)
+
+    silhouette = metrics.get("silhouette")
+    if isinstance(silhouette, (int, float)) and silhouette is not None:
+        penalty = min(100.0, 30.0 + float(silhouette) * 70.0)
+        return max(0.0, 100.0 - penalty)
+
+    return 70.0
+
+
+def _modality_score(modality_metrics: Dict[str, object]) -> float:
+    modality = str(modality_metrics.get("modality") or "mixed")
+    confidence = float(modality_metrics.get("confidence") or 0.6)
+
+    if modality == "mixed":
+        return max(40.0, min(85.0, confidence * 100.0))
+    if confidence < 0.65:
+        return 85.0
+    return 100.0
 
